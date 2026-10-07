@@ -1,0 +1,59 @@
+# auth.py
+import hashlib
+from datetime import datetime
+from database import get_conn
+
+
+def hash_password(password: str) -> str:
+    """Простое хэширование пароля. Для продакшена заменить на bcrypt/argon2."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def authenticate(username: str, password: str):
+    """Возвращает dict(id, username, role) или None."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, role FROM users WHERE username=? AND password_hash=?",
+        (username, hash_password(password))
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_user(username: str, password: str, role: str = "user"):
+    """Создаёт пользователя. Возвращает (ok: bool, message: str)."""
+    import sqlite3
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
+            (username, hash_password(password), role, datetime.now().isoformat())
+        )
+        conn.commit()
+        return True, "OK"
+    except sqlite3.IntegrityError:
+        return False, "Пользователь уже существует"
+    finally:
+        conn.close()
+
+
+def ensure_default_admin():
+    """Гарантирует наличие admin/admin при первом запуске."""
+    conn = get_conn()
+    row = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()
+    if row[0] == 0:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
+            ("admin", hash_password("admin"), "admin", datetime.now().isoformat())
+        )
+        conn.commit()
+    conn.close()
+
+
+def all_users():
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, username, role, created_at FROM users"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
